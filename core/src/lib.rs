@@ -140,6 +140,117 @@ pub struct BoardCommitOutput {
 }
 
 // ---------------------------------------------------------------------------
+// Proofs for next Rounds
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttackResult {
+    Hit,
+    Miss,
+}
+
+// ---------------------------------------------------------------------------
+// Public transcript entry
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct TranscriptEntry {
+    pub coord: (u8, u8),
+    pub result: AttackResult,
+}
+
+// ---------------------------------------------------------------------------
+// Hit/Miss proof I/O
+// ---------------------------------------------------------------------------
+
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct HitMissInput {
+    pub ships: [Ship; 5],
+    pub blinding: [u8; 32],
+    pub attack_coord: (u8, u8),
+    pub round_number: u32,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct HitMissOutput {
+    pub commitment: [u8; 32],
+    pub attack_coord: (u8, u8),
+    pub result: AttackResult,
+    pub round_number: u32,
+}
+
+// ---------------------------------------------------------------------------
+//  Ship Sunk proof I/O
+// ---------------------------------------------------------------------------
+
+
+///? Private Witness for ship sinking
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ShipSunkInput {
+    pub ships: [Ship; 5],
+    pub blinding: [u8; 32],
+    pub sunk_ship_index: u8,
+    /// Hit coordinates derived from the public transcript (only HIT entries).
+    pub hit_log: Vec<(u8, u8)>,
+    /// For each cell of the sunk ship, the index into `hit_log` where that
+    /// cell's coordinate appears.  Length == ship.len().
+    pub hit_indices: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ShipSunkOutput {
+    pub commitment: [u8; 32],
+    pub ship_index: u8,
+    pub transcript_length: u32,
+}
+
+// ---------------------------------------------------------------------------
+// No Ship Sunk proof I/O
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct NoShipSunkInput {
+    pub ships: [Ship; 5],
+    pub blinding: [u8; 32],
+    /// One surviving-cell index per ship (index within the ship, 0..len-1).
+    pub surviving_cell_indices: [u8; 5],
+    /// Hit coordinates derived from the public transcript (only HIT entries).
+    pub hit_log: Vec<(u8, u8)>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct NoShipSunkOutput {
+    pub commitment: [u8; 32],
+    pub transcript_length: u32,
+}
+
+// ---------------------------------------------------------------------------
+// Canonical commitment preimage
+// ---------------------------------------------------------------------------
+
+/// Build the canonical byte preimage used for the SHA-256 board commitment.
+///
+/// Format: `blinding (32 bytes) || ship₀.row || ship₀.col || ship₀.orientation
+///          || ... || ship₄.row || ship₄.col || ship₄.orientation`
+///
+/// This function is used by **every** guest program to re-derive the
+/// commitment and chain-of-trust-check against the stored `C`.
+pub fn canonical_preimage(ships: &[Ship; 5], blinding: &[u8; 32]) -> Vec<u8> {
+    let mut preimage: Vec<u8> = Vec::with_capacity(32 + 5 * 3);
+    preimage.extend_from_slice(blinding);
+    for ship in ships.iter() {
+        preimage.push(ship.row);
+        preimage.push(ship.col);
+        preimage.push(match ship.orientation {
+            Orientation::Horizontal => 0u8,
+            Orientation::Vertical => 1u8,
+        });
+    }
+    preimage
+}
+
+// ---------------------------------------------------------------------------
 // Player state
 // ---------------------------------------------------------------------------
 
