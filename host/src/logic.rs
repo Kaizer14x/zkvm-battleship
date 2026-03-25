@@ -300,15 +300,18 @@ fn step_sinking_declaration(store: &mut GameStore) {
         // ---------------------------------------------------------------
         // Path B — No ship has sunk yet: prove it.
         // ---------------------------------------------------------------
+        let already_sunk_indices = store.sunk_ships[defender].clone();
+
         let surviving_cell_indices =
-            find_surviving_indices(&ships, &hit_log)
-                .expect("engine: no sunk ship detected but a ship has all cells hit");
+            find_surviving_indices(&ships, &hit_log, &already_sunk_indices)
+                .expect("engine: no sunk ship detected but a surviving ship has all cells hit");
 
         let input = NoShipSunkInput {
             ships,
             blinding,
             surviving_cell_indices,
             hit_log: hit_log.clone(),
+            already_sunk_indices: already_sunk_indices.clone(),
         };
 
         show_message("  Generating no-ship-sunk proof...");
@@ -336,6 +339,10 @@ fn step_sinking_declaration(store: &mut GameStore) {
         assert_eq!(
             output.transcript_length, transcript_length,
             "no_ship_sunk: stale transcript length"
+        );
+        assert_eq!(
+            output.already_sunk_indices, already_sunk_indices,
+            "no_ship_sunk: already_sunk_indices mismatch"
         );
     }
 }
@@ -421,13 +428,20 @@ fn find_newly_sunk_ship(ships: &[Ship; 5], hit_log: &[(u8, u8)], already_sunk: &
 }
 
 /// For Path B (no ship sunk): finds one surviving (un-hit) cell index per ship.
-/// Returns None if any ship has all its cells in the hit log (i.e., it IS sunk).
+/// Ships in `already_sunk` are skipped (their slot is set to 0).
+/// Returns None if any *surviving* ship has all its cells in the hit log.
 fn find_surviving_indices(
     ships: &[Ship; 5],
     hit_log: &[(u8, u8)],
+    already_sunk: &[u8],
 ) -> Option<[u8; 5]> {
     let mut out = [0u8; 5];
     for (i, ship) in ships.iter().enumerate() {
+        if already_sunk.contains(&(i as u8)) {
+            // Sunk ships get a sentinel value; the guest ignores them.
+            out[i] = 0;
+            continue;
+        }
         let cells: Vec<(u8, u8)> = ship.cells().collect();
         let survivor_idx = cells.iter().position(|c| !hit_log.contains(c))?;
         out[i] = survivor_idx as u8;

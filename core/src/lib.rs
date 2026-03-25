@@ -214,15 +214,20 @@ pub struct NoShipSunkInput {
     pub ships: [Ship; 5],
     pub blinding: [u8; 32],
     /// One surviving-cell index per ship (index within the ship, 0..len-1).
+    /// Entries for ships listed in `already_sunk_indices` are ignored (set to 0).
     pub surviving_cell_indices: [u8; 5],
     /// Hit coordinates derived from the public transcript (only HIT entries).
     pub hit_log: Vec<(u8, u8)>,
+    /// Ship indices (0–4) that have already been declared sunk via ShipSunk proofs.
+    pub already_sunk_indices: Vec<u8>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NoShipSunkOutput {
     pub commitment: [u8; 32],
     pub transcript_length: u32,
+    /// Echoed from input so the verifier can cross-check against the public sunk-ship ledger.
+    pub already_sunk_indices: Vec<u8>,
 }
 
 // ---------------------------------------------------------------------------

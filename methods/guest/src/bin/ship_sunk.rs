@@ -2,7 +2,7 @@
 
 risc0_zkvm::guest::entry!(main);
 
-use battleship_core::{canonical_preimage, ShipSunkInput, ShipSunkOutput};
+use battleship_core::{canonical_preimage, ShipSunkInput, ShipSunkOutput, ShipType};
 use risc0_zkvm::guest::env;
 use risc0_zkvm::sha::Impl as Sha2Impl;
 use risc0_zkvm::sha::Sha256;

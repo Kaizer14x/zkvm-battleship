@@ -188,12 +188,14 @@ fn no_ship_sunk_empty_hit_log() {
         blinding,
         surviving_cell_indices: [0, 0, 0, 0, 0],
         hit_log: vec![],
+        already_sunk_indices: vec![],
     };
 
     let output = prove_no_ship_sunk(&input);
 
     assert_eq!(output.commitment, commitment);
     assert_eq!(output.transcript_length, 0);
+    assert_eq!(output.already_sunk_indices, Vec::<u8>::new());
 }
 
 /// Each ship has been partially hit (first cell only) — surviving cells exist.
@@ -216,12 +218,14 @@ fn no_ship_sunk_partial_hits() {
         blinding,
         surviving_cell_indices,
         hit_log,
+        already_sunk_indices: vec![],
     };
 
     let output = prove_no_ship_sunk(&input);
 
     assert_eq!(output.commitment, commitment);
     assert_eq!(output.transcript_length, 5);
+    assert_eq!(output.already_sunk_indices, Vec::<u8>::new());
 }
 
 /// Claimed survivor cell is actually in the hit log → proof must fail.
@@ -240,6 +244,7 @@ fn no_ship_sunk_false_survivor_fails() {
         blinding,
         surviving_cell_indices: [0, 0, 0, 0, 0],
         hit_log,
+        already_sunk_indices: vec![],
     };
 
     let env = ExecutorEnv::builder()
@@ -252,5 +257,68 @@ fn no_ship_sunk_false_survivor_fails() {
     assert!(
         result.is_err(),
         "false survivor (cell in hit_log) should cause proof to fail"
+    );
+}
+
+/// Destroyer (index 4) is fully hit and already declared sunk.
+/// Passing `already_sunk_indices: vec![4]` lets the guest skip it.
+/// The remaining 4 ships each have a valid surviving cell → proof succeeds.
+#[test]
+fn no_ship_sunk_with_previously_sunk_ship() {
+    let ships = common::valid_ships();
+    let blinding = common::zero_blinding();
+    let commitment = common::prove_board_commitment(&ships, &blinding);
+
+    // Destroyer cells (8,0)-(8,1) are both in hit_log — it is sunk.
+    let hit_log = vec![(8, 0), (8, 1)];
+
+    // surviving_cell_indices: cell 0 for ships 0–3 (all untouched), 0 for
+    // ship 4 (ignored because it's listed in already_sunk_indices).
+    let input = NoShipSunkInput {
+        ships,
+        blinding,
+        surviving_cell_indices: [0, 0, 0, 0, 0],
+        hit_log,
+        already_sunk_indices: vec![4],
+    };
+
+    let output = prove_no_ship_sunk(&input);
+
+    assert_eq!(output.commitment, commitment);
+    assert_eq!(output.transcript_length, 2);
+    assert_eq!(output.already_sunk_indices, vec![4u8]);
+}
+
+/// A ship is fully hit but NOT listed in `already_sunk_indices`.
+/// The guest cannot find a surviving cell for it → proof must fail.
+#[test]
+fn no_ship_sunk_lying_about_sunk_status() {
+    let ships = common::valid_ships();
+    let blinding = common::zero_blinding();
+
+    // All Destroyer cells hit, but we do NOT list index 4 in already_sunk_indices.
+    let hit_log = vec![(8, 0), (8, 1)];
+
+    // Cell 0 of Destroyer is (8,0), which IS in hit_log. Cell 1 is (8,1), also hit.
+    // No valid surviving cell can be provided for ship 4.
+    // We try claiming cell 0 — the guest should reject because it's in hit_log.
+    let input = NoShipSunkInput {
+        ships,
+        blinding,
+        surviving_cell_indices: [0, 0, 0, 0, 0],
+        hit_log,
+        already_sunk_indices: vec![], // lying: not listing the sunk ship
+    };
+
+    let env = ExecutorEnv::builder()
+        .write(&input)
+        .expect("serialise")
+        .build()
+        .expect("build env");
+
+    let result = default_prover().prove(env, NO_SHIP_SUNK_ELF);
+    assert!(
+        result.is_err(),
+        "omitting a sunk ship from already_sunk_indices should cause proof to fail"
     );
 }
