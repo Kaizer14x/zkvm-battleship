@@ -1,31 +1,22 @@
 use std::io::{self, BufRead, Write};
 
-use battleship_core::{Direction, Orientation, Player, Ship, ShipType};
+use battleship_core::{AttackResult, Direction, Orientation, Player, Ship, ShipType, TranscriptEntry};
 
+// ---------------------------------------------------------------------------
+// Basic I/O primitives
+// ---------------------------------------------------------------------------
 
-
-// GENERATED CODE —, ITS A BOILERPLATE FOR THE DISPLAY MODULE.
-//TODO : MAKING A BEAUTIFUL DISPLAY
-
-
-
-/// Print a single message line to stdout.
 pub fn show_message(msg: &str) {
     println!("{}", msg);
 }
 
-/// Read one trimmed line from stdin.  Retries on I/O error.
 fn read_line() -> String {
     let stdin = io::stdin();
     let mut line = String::new();
-    stdin
-        .lock()
-        .read_line(&mut line)
-        .expect("Failed to read stdin");
+    stdin.lock().read_line(&mut line).expect("Failed to read stdin");
     line.trim().to_string()
 }
 
-/// Flush stdout so prompts appear before blocking on input.
 fn prompt(msg: &str) -> String {
     print!("{}", msg);
     io::stdout().flush().ok();
@@ -33,20 +24,15 @@ fn prompt(msg: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Board display
+// Round 0 — Board display & ship placement
 // ---------------------------------------------------------------------------
 
 /// Print a 10×10 ASCII grid showing the player's own ship placements.
-///
-/// Legend:
-///   `.` — empty cell
-///   `S` — occupied by a ship
 pub fn show_board(player: &Player) {
     println!("\n  Player {} board:", player.id + 1);
     println!("    0 1 2 3 4 5 6 7 8 9");
     println!("   +-------------------+");
 
-    // Build an occupancy map from the player's ships.
     let mut grid = [[false; 10]; 10];
     if let Some(ships) = &player.ships {
         for ship in ships.iter() {
@@ -67,27 +53,10 @@ pub fn show_board(player: &Player) {
     println!("   +-------------------+\n");
 }
 
-// ---------------------------------------------------------------------------
-// Ship placement prompt
-// ---------------------------------------------------------------------------
-
 /// Prompt the player to place one ship.
-///
-/// Returns `(anchor_row, anchor_col, orientation, direction)` — still in raw
-/// user-input form.  The caller (logic.rs) is responsible for normalisation.
-///
-/// Inputs accepted:
-///   row / col : 0-9
-///   orientation: h / H  →  Horizontal
-///                v / V  →  Vertical
-///   direction:  r / R   →  Right  (for Horizontal)
-///               l / L   →  Left   (for Horizontal)
-///               d / D   →  Down   (for Vertical)
-///               u / U   →  Up     (for Vertical)
 pub fn prompt_ship_placement(ship_type: ShipType) -> (u8, u8, Orientation, Direction) {
     println!("\n--- Place your {} ---", ship_type.name());
 
-    // Row
     let row: u8 = loop {
         let s = prompt("  Anchor row (0-9): ");
         match s.parse::<u8>() {
@@ -96,7 +65,6 @@ pub fn prompt_ship_placement(ship_type: ShipType) -> (u8, u8, Orientation, Direc
         }
     };
 
-    // Column
     let col: u8 = loop {
         let s = prompt("  Anchor col (0-9): ");
         match s.parse::<u8>() {
@@ -105,7 +73,6 @@ pub fn prompt_ship_placement(ship_type: ShipType) -> (u8, u8, Orientation, Direc
         }
     };
 
-    // Orientation
     let orientation = loop {
         let s = prompt("  Orientation (h=horizontal / v=vertical): ");
         match s.to_lowercase().as_str() {
@@ -115,7 +82,6 @@ pub fn prompt_ship_placement(ship_type: ShipType) -> (u8, u8, Orientation, Direc
         }
     };
 
-    // Direction — must be consistent with the chosen orientation
     let direction = loop {
         let hint = match orientation {
             Orientation::Horizontal => "r=right / l=left",
@@ -134,10 +100,6 @@ pub fn prompt_ship_placement(ship_type: ShipType) -> (u8, u8, Orientation, Direc
     (row, col, orientation, direction)
 }
 
-// ---------------------------------------------------------------------------
-// Ship placement summary
-// ---------------------------------------------------------------------------
-
 /// Print a confirmation line for a placed ship.
 pub fn show_ship_placed(ship: &Ship) {
     println!(
@@ -147,4 +109,111 @@ pub fn show_ship_placed(ship: &Ship) {
         ship.col,
         ship.orientation
     );
+}
+
+// ---------------------------------------------------------------------------
+// Round 1+ — Attack display
+// ---------------------------------------------------------------------------
+
+/// Prompt the attacking player for a target coordinate.
+pub fn prompt_attack(attacker_id: usize) -> (u8, u8) {
+    println!("\n  Player {} — choose your target:", attacker_id + 1);
+
+    let row: u8 = loop {
+        let s = prompt("  Target row (0-9): ");
+        match s.parse::<u8>() {
+            Ok(v) if v < 10 => break v,
+            _ => println!("  Invalid: enter a number 0-9."),
+        }
+    };
+
+    let col: u8 = loop {
+        let s = prompt("  Target col (0-9): ");
+        match s.parse::<u8>() {
+            Ok(v) if v < 10 => break v,
+            _ => println!("  Invalid: enter a number 0-9."),
+        }
+    };
+
+    (row, col)
+}
+
+/// Announce the verified hit/miss result.
+pub fn show_attack_result(coord: (u8, u8), result: AttackResult) {
+    match result {
+        AttackResult::Hit => println!("\n  💥 HIT at ({}, {})!", coord.0, coord.1),
+        AttackResult::Miss => println!("\n  〇 MISS at ({}, {}).", coord.0, coord.1),
+    }
+}
+
+/// Display the attacker's shot board: what they know about the opponent's grid.
+///
+/// Legend:  `.` unknown  `X` confirmed hit  `O` confirmed miss
+pub fn show_shot_board(attacker_id: usize, transcript: &[TranscriptEntry]) {
+    // Determine which transcript entries belong to this attacker.
+    // Attacker 0's entries are at even indices (0, 2, 4, …).
+    // Attacker 1's entries are at odd  indices (1, 3, 5, …).
+    let mut hits = [[false; 10]; 10];
+    let mut misses = [[false; 10]; 10];
+
+    for (i, entry) in transcript.iter().enumerate() {
+        let this_attackers_shot = (attacker_id == 0 && i % 2 == 0)
+            || (attacker_id == 1 && i % 2 == 1);
+        if this_attackers_shot {
+            let (r, c) = (entry.coord.0 as usize, entry.coord.1 as usize);
+            match entry.result {
+                AttackResult::Hit => hits[r][c] = true,
+                AttackResult::Miss => misses[r][c] = true,
+            }
+        }
+    }
+
+    println!("\n  Player {} — shot board:", attacker_id + 1);
+    println!("    0 1 2 3 4 5 6 7 8 9");
+    println!("   +-------------------+");
+    for row in 0..10usize {
+        print!(" {} |", row);
+        for col in 0..10usize {
+            let ch = if hits[row][col] {
+                'X'
+            } else if misses[row][col] {
+                'O'
+            } else {
+                '.'
+            };
+            print!(" {}", ch);
+        }
+        println!(" |");
+    }
+    println!("   +-------------------+");
+}
+
+// ---------------------------------------------------------------------------
+// Round 1+ — Sinking announcements
+// ---------------------------------------------------------------------------
+
+/// Announce a ship has been sunk.
+pub fn show_sinking_announcement(defender_id: usize, ship_type: ShipType) {
+    println!(
+        "\n  🚢 Player {}'s {} has been sunk!",
+        defender_id + 1,
+        ship_type.name()
+    );
+}
+
+/// Show the current tally of sunk ships for both players.
+pub fn show_sunk_summary(store: &crate::storage::GameStore) {
+    println!("\n  --- Ships sunk so far ---");
+    for player_id in 0..2 {
+        let sunk = &store.sunk_ships[player_id];
+        if sunk.is_empty() {
+            println!("  Player {}: none", player_id + 1);
+        } else {
+            let names: Vec<&str> = sunk
+                .iter()
+                .map(|&idx| ShipType::ALL[idx as usize].name())
+                .collect();
+            println!("  Player {}: {}", player_id + 1, names.join(", "));
+        }
+    }
 }

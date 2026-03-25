@@ -8,9 +8,8 @@ use risc0_zkvm::sha::Impl as Sha2Impl;
 use risc0_zkvm::sha::Sha256;
 
 fn main() {
-    // -----------------------------------------------------------------------
-    // 1. Read the private witness.
-    // -----------------------------------------------------------------------
+
+    
     let input: BoardCommitInput = env::read();
 
     let ships = &input.ships;
@@ -27,7 +26,7 @@ fn main() {
     //
     //    Orientation validity is guaranteed by the type system: serde
     //    deserialization panics on unknown enum variants, so if we reach here
-    //    all orientations are legal (Pattern 5: Structural Impossibility).
+    //    all orientations are legal 
     // -----------------------------------------------------------------------
     for ship in ships.iter() {
         let len = ship.ship_type.len();
@@ -90,8 +89,6 @@ fn main() {
     //    followed by each ship encoded as: row (1 byte) || col (1 byte) ||
     //    orientation (1 byte: 0 = H, 1 = V) — in canonical ShipType order.
     //
-    //    SHA-256 is hardware-accelerated in risc0 (precompile syscall), making
-    //    it far cheaper here than Poseidon which has no precompile.
     // -----------------------------------------------------------------------
     let mut preimage: Vec<u8> = Vec::with_capacity(32 + 5 * 3);
 
